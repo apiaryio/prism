@@ -1,1 +1,4 @@
-hide-*.js
+.DS_Store
+npm-debug.log
+profile
+node_modules
