@@ -1,8 +1,5 @@
 define(function() {
-
-  // Export
   return function(Prism) {
-
     Prism.languages.php = {
       'comment': {
         pattern: /(^|[^\\])(\/\*[\w\W]*?\*\/|\/\/.*?(\r?\n|$))/g,
@@ -23,7 +20,5 @@ define(function() {
       'operator': /[-+]{1,2}|!|=?\<|=?\>;|={1,2}(?!>)|(\&){1,2}|\|?\||\?|\*|\//g,
       'punctuation': /[{}[\];(),.:]/g
     };
-
   };
-
 });

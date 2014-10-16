@@ -1,8 +1,5 @@
 define(function() {
-
-  // Export
   return function(Prism) {
-
     Prism.languages.ruby = {
       'comment': /#[^\r\n]*(\r?\n|$)/g,
       'string': /("|')(\\?.)*?\1/g,
@@ -21,7 +18,5 @@ define(function() {
       'ignore': /&(lt|gt|amp);/gi,
       'punctuation': /[{}[\];(),.:]/g
     };
-
   };
-
 });

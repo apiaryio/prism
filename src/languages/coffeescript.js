@@ -1,8 +1,5 @@
 define(function() {
-
-  // Export
   return function(Prism) {
-
     Prism.languages.coffeescript = Prism.languages.extend('javascript', {
       'block-comment': /([#]{3}\s*\r?\n(.*\s*\r*\n*)\s*?\r?\n[#]{3})/g,
       'comment': /(\s|^)([#]{1}[^#^\r^\n]{2,}?(\r?\n|$))/g,
@@ -25,7 +22,5 @@ define(function() {
 
       'attr-name': /[_?a-z-|A-Z-]+(\s*:)| @[_?$?a-z-|A-Z-]+(\s*)| /g
     });
-
   };
-
 });
