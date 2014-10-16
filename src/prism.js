@@ -1,335 +1,395 @@
+/**
+ * Prism: Lightweight, robust, elegant syntax highlighting
+ * MIT license http://www.opensource.org/licenses/mit-license.php/
+ * @author Lea Verou http://lea.verou.me
+ */
 define(function() {
+  self = (typeof window !== 'undefined')
+    ? window   // if in browser
+    : (
+      (typeof WorkerGlobalScope !== 'undefined' && self instanceof WorkerGlobalScope)
+      ? self // if in worker
+      : {}   // if in node js
+    );
+
+  var Prism = (function(){
+
+  // Private helper vars
+  var lang = /\blang(?:uage)?-(?!\*)(\w+)\b/i;
+
+  var _ = self.Prism = {
+    util: {
+      encode: function (tokens) {
+        if (tokens instanceof Token) {
+          return new Token(tokens.type, _.util.encode(tokens.content), tokens.alias);
+        } else if (_.util.type(tokens) === 'Array') {
+          return tokens.map(_.util.encode);
+        } else {
+          return tokens.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/\u00a0/g, ' ');
+        }
+      },
+
+      type: function (o) {
+        return Object.prototype.toString.call(o).match(/\[object (\w+)\]/)[1];
+      },
+
+      // Deep clone a language definition (e.g. to extend it)
+      clone: function (o) {
+        var type = _.util.type(o);
+
+        switch (type) {
+          case 'Object':
+            var clone = {};
+
+            for (var key in o) {
+              if (o.hasOwnProperty(key)) {
+                clone[key] = _.util.clone(o[key]);
+              }
+            }
+
+            return clone;
+
+          case 'Array':
+            return o.slice();
+        }
+
+        return o;
+      }
+    },
+
+    languages: {
+      extend: function (id, redef) {
+        var lang = _.util.clone(_.languages[id]);
+
+        for (var key in redef) {
+          lang[key] = redef[key];
+        }
+
+        return lang;
+      },
+
+      // Insert a token before another token in a language literal
+      insertBefore: function (inside, before, insert, root) {
+        root = root || _.languages;
+        var grammar = root[inside];
+        var ret = {};
+
+        for (var token in grammar) {
+
+          if (grammar.hasOwnProperty(token)) {
+
+            if (token == before) {
+
+              for (var newToken in insert) {
+
+                if (insert.hasOwnProperty(newToken)) {
+                  ret[newToken] = insert[newToken];
+                }
+              }
+            }
+
+            ret[token] = grammar[token];
+          }
+        }
+
+        return root[inside] = ret;
+      },
+
+      // Traverse a language definition with Depth First Search
+      DFS: function(o, callback, type) {
+        for (var i in o) {
+          if (o.hasOwnProperty(i)) {
+            callback.call(o, i, o[i], type || i);
+
+            if (_.util.type(o[i]) === 'Object') {
+              _.languages.DFS(o[i], callback);
+            } else if (_.util.type(o[i]) === 'Array') {
+              _.languages.DFS(o[i], callback, i);
+            }
+          }
+        }
+      }
+    },
 
-	// Private helper vars
-	var lang = /\blang(?:uage)?-(?!\*)(\w+)\b/i;
+    highlightAll: function(async, callback) {
+      var elements = document.querySelectorAll('code[class*="language-"], [class*="language-"] code, code[class*="lang-"], [class*="lang-"] code');
 
-	var Prism = {
+      for (var i=0, element; element = elements[i++];) {
+        _.highlightElement(element, async === true, callback);
+      }
+    },
 
-		util: {
+    highlightElement: function(element, async, callback) {
+      // Find language
+      var language, grammar, parent = element;
 
-			type: function (o) {
-				return Object.prototype.toString.call(o).match(/\[object (\w+)\]/)[1];
-			},
+      while (parent && !lang.test(parent.className)) {
+        parent = parent.parentNode;
+      }
 
-			// Deep clone a language definition (e.g. to extend it)
-			clone: function (o) {
-				var type = Prism.util.type(o);
+      if (parent) {
+        language = (parent.className.match(lang) || [,''])[1];
+        grammar = _.languages[language];
+      }
 
-				switch (type) {
-					case 'Object':
-						var clone = {};
+      if (!grammar) {
+        return;
+      }
 
-						for (var key in o) {
-							if (o.hasOwnProperty(key)) {
-								clone[key] = Prism.util.clone(o[key]);
-							}
-						}
+      // Set language on the element, if not present
+      element.className = element.className.replace(lang, '').replace(/\s+/g, ' ') + ' language-' + language;
 
-						return clone;
+      // Set language on the parent, for styling
+      parent = element.parentNode;
 
-					case 'Array':
-						return o.slice();
-				}
+      if (/pre/i.test(parent.nodeName)) {
+        parent.className = parent.className.replace(lang, '').replace(/\s+/g, ' ') + ' language-' + language;
+      }
 
-				return o;
-			}
+      var code = element.textContent;
 
-		},
+      if(!code) {
+        return;
+      }
 
-		languages: {
-			extend: function (id, redef) {
-				var lang = Prism.util.clone(Prism.languages[id]);
+      var env = {
+        element: element,
+        language: language,
+        grammar: grammar,
+        code: code
+      };
 
-				for (var key in redef) {
-					lang[key] = redef[key];
-				}
+      _.hooks.run('before-highlight', env);
 
-				return lang;
-			},
+      if (async && self.Worker) {
+        var worker = new Worker(_.filename);
 
-			// Insert a token before another token in a language literal
-			insertBefore: function (inside, before, insert, root) {
-				root = root || Prism.languages;
-				var grammar = root[inside];
-				var ret = {};
+        worker.onmessage = function(evt) {
+          env.highlightedCode = Token.stringify(JSON.parse(evt.data), language);
 
-				for (var token in grammar) {
+          _.hooks.run('before-insert', env);
 
-					if (grammar.hasOwnProperty(token)) {
+          env.element.innerHTML = env.highlightedCode;
 
-						if (token == before) {
+          callback && callback.call(env.element);
+          _.hooks.run('after-highlight', env);
+        };
 
-							for (var newToken in insert) {
+        worker.postMessage(JSON.stringify({
+          language: env.language,
+          code: env.code
+        }));
+      }
+      else {
+        env.highlightedCode = _.highlight(env.code, env.grammar, env.language)
 
-								if (insert.hasOwnProperty(newToken)) {
-									ret[newToken] = insert[newToken];
-								}
-							}
-						}
+        _.hooks.run('before-insert', env);
 
-						ret[token] = grammar[token];
-					}
-				}
+        env.element.innerHTML = env.highlightedCode;
 
-				return root[inside] = ret;
-			},
+        callback && callback.call(element);
 
-			// Traverse a language definition with Depth First Search
-			DFS: function(o, callback) {
-				for (var i in o) {
-					callback.call(o, i, o[i]);
+        _.hooks.run('after-highlight', env);
+      }
+    },
 
-					if (Prism.util.type(o) === 'Object') {
-						Prism.languages.DFS(o[i], callback);
-					}
-				}
-			}
-		},
+    highlight: function (text, grammar, language) {
+      var tokens = _.tokenize(text, grammar);
+      return Token.stringify(_.util.encode(tokens), language);
+    },
 
-		highlightAll: function(async, callback) {
-			var elements = document.querySelectorAll('code[class*="language-"], [class*="language-"] code, code[class*="lang-"], [class*="lang-"] code');
+    tokenize: function(text, grammar, language) {
+      var Token = _.Token;
 
-			for (var i=0, element; element = elements[i++];) {
-				Prism.highlightElement(element, async === true, callback);
-			}
-		},
+      var strarr = [text];
 
-		highlightElement: function(element, async, callback) {
-			// Find language
-			var language, grammar, parent = element;
+      var rest = grammar.rest;
 
-			while (parent && !lang.test(parent.className)) {
-				parent = parent.parentNode;
-			}
+      if (rest) {
+        for (var token in rest) {
+          grammar[token] = rest[token];
+        }
 
-			if (parent) {
-				language = (parent.className.match(lang) || [,''])[1];
-				grammar = Prism.languages[language];
-			}
+        delete grammar.rest;
+      }
 
-			if (!grammar) {
-				return;
-			}
+      tokenloop: for (var token in grammar) {
+        if(!grammar.hasOwnProperty(token) || !grammar[token]) {
+          continue;
+        }
 
-			// Set language on the element, if not present
-			element.className = element.className.replace(lang, '').replace(/\s+/g, ' ') + ' language-' + language;
+        var patterns = grammar[token];
+        patterns = (_.util.type(patterns) === "Array") ? patterns : [patterns];
 
-			// Set language on the parent, for styling
-			parent = element.parentNode;
+        for (var j = 0; j < patterns.length; ++j) {
+          var pattern = patterns[j],
+            inside = pattern.inside,
+            lookbehind = !!pattern.lookbehind,
+            lookbehindLength = 0,
+            alias = pattern.alias;
 
-			if (/pre/i.test(parent.nodeName)) {
-				parent.className = parent.className.replace(lang, '').replace(/\s+/g, ' ') + ' language-' + language;
-			}
+          pattern = pattern.pattern || pattern;
 
-			var code = element.textContent;
+          for (var i=0; i<strarr.length; i++) { // Don’t cache length as it changes during the loop
 
-			if(!code) {
-				return;
-			}
+            var str = strarr[i];
 
-			code = code.replace(/&/g, '&amp;').replace(/</g, '&lt;')
-			           .replace(/>/g, '&gt;').replace(/\u00a0/g, ' ');
-			//console.time(code.slice(0,50));
+            if (strarr.length > text.length) {
+              // Something went terribly wrong, ABORT, ABORT!
+              break tokenloop;
+            }
 
-			var env = {
-				element: element,
-				language: language,
-				grammar: grammar,
-				code: code
-			};
+            if (str instanceof Token) {
+              continue;
+            }
 
-			Prism.hooks.run('before-highlight', env);
+            pattern.lastIndex = 0;
 
-			if (async && self.Worker) {
-				var worker = new Worker(Prism.filename);
+            var match = pattern.exec(str);
 
-				worker.onmessage = function(evt) {
-					env.highlightedCode = Token.stringify(JSON.parse(evt.data), language);
-					env.element.innerHTML = env.highlightedCode;
+            if (match) {
+              if(lookbehind) {
+                lookbehindLength = match[1].length;
+              }
 
-					callback && callback.call(env.element);
-					//console.timeEnd(code.slice(0,50));
-					Prism.hooks.run('after-highlight', env);
-				};
+              var from = match.index - 1 + lookbehindLength,
+                match = match[0].slice(lookbehindLength),
+                len = match.length,
+                to = from + len,
+                before = str.slice(0, from + 1),
+                after = str.slice(to + 1);
 
-				worker.postMessage(JSON.stringify({
-					language: env.language,
-					code: env.code
-				}));
-			}
-			else {
-				env.highlightedCode = Prism.highlight(env.code, env.grammar, env.language)
-				env.element.innerHTML = env.highlightedCode;
+              var args = [i, 1];
 
-				callback && callback.call(element);
+              if (before) {
+                args.push(before);
+              }
 
-				Prism.hooks.run('after-highlight', env);
-				//console.timeEnd(code.slice(0,50));
-			}
-		},
+              var wrapped = new Token(token, inside? _.tokenize(match, inside) : match, alias);
 
-		highlight: function (text, grammar, language) {
-			return Token.stringify(Prism.tokenize(text, grammar), language);
-		},
+              args.push(wrapped);
 
-		tokenize: function(text, grammar, language) {
-			var Token = Prism.Token;
+              if (after) {
+                args.push(after);
+              }
 
-			var strarr = [text];
+              Array.prototype.splice.apply(strarr, args);
+            }
+          }
+        }
+      }
 
-			var rest = grammar.rest;
+      return strarr;
+    },
 
-			if (rest) {
-				for (var token in rest) {
-					grammar[token] = rest[token];
-				}
+    hooks: {
+      all: {},
 
-				delete grammar.rest;
-			}
+      add: function (name, callback) {
+        var hooks = _.hooks.all;
 
-			tokenloop: for (var token in grammar) {
-				if(!grammar.hasOwnProperty(token) || !grammar[token]) {
-					continue;
-				}
+        hooks[name] = hooks[name] || [];
 
-				var pattern = grammar[token],
-					inside = pattern.inside,
-					lookbehind = !!pattern.lookbehind || 0;
+        hooks[name].push(callback);
+      },
 
-				pattern = pattern.pattern || pattern;
+      run: function (name, env) {
+        var callbacks = _.hooks.all[name];
 
-				for (var i=0; i<strarr.length; i++) { // Don’t cache length as it changes during the loop
+        if (!callbacks || !callbacks.length) {
+          return;
+        }
 
-					var str = strarr[i];
+        for (var i=0, callback; callback = callbacks[i++];) {
+          callback(env);
+        }
+      }
+    }
+  };
 
-					if (strarr.length > text.length) {
-						// Something went terribly wrong, ABORT, ABORT!
-						break tokenloop;
-					}
+  var Token = _.Token = function(type, content, alias) {
+    this.type = type;
+    this.content = content;
+    this.alias = alias;
+  };
 
-					if (str instanceof Token) {
-						continue;
-					}
+  Token.stringify = function(o, language, parent) {
+    if (typeof o == 'string') {
+      return o;
+    }
 
-					pattern.lastIndex = 0;
+    if (Object.prototype.toString.call(o) == '[object Array]') {
+      return o.map(function(element) {
+        return Token.stringify(element, language, o);
+      }).join('');
+    }
 
-					var match = pattern.exec(str);
+    var env = {
+      type: o.type,
+      content: Token.stringify(o.content, language, parent),
+      tag: 'span',
+      classes: ['token', o.type],
+      attributes: {},
+      language: language,
+      parent: parent
+    };
 
-					if (match) {
-						if(lookbehind) {
-							lookbehind = match[1].length;
-						}
+    if (env.type == 'comment') {
+      env.attributes['spellcheck'] = 'true';
+    }
 
-						var from = match.index - 1 + lookbehind,
-						    match = match[0].slice(lookbehind),
-						    len = match.length,
-						    to = from + len,
-							before = str.slice(0, from + 1),
-							after = str.slice(to + 1);
+    if (o.alias) {
+      var aliases = _.util.type(o.alias) === 'Array' ? o.alias : [o.alias];
+      Array.prototype.push.apply(env.classes, aliases);
+    }
 
-						var args = [i, 1];
+    _.hooks.run('wrap', env);
 
-						if (before) {
-							args.push(before);
-						}
+    var attributes = '';
 
-						var wrapped = new Token(token, inside? Prism.tokenize(match, inside) : match);
+    for (var name in env.attributes) {
+      attributes += name + '="' + (env.attributes[name] || '') + '"';
+    }
 
-						args.push(wrapped);
+    return '<' + env.tag + ' class="' + env.classes.join(' ') + '" ' + attributes + '>' + env.content + '</' + env.tag + '>';
 
-						if (after) {
-							args.push(after);
-						}
+  };
 
-						Array.prototype.splice.apply(strarr, args);
-					}
-				}
-			}
+  if (!self.document) {
+    if (!self.addEventListener) {
+      // in Node.js
+      return self.Prism;
+    }
+    // In worker
+    self.addEventListener('message', function(evt) {
+      var message = JSON.parse(evt.data),
+          lang = message.language,
+          code = message.code;
 
-			return strarr;
-		},
+      self.postMessage(JSON.stringify(_.util.encode(_.tokenize(code, _.languages[lang]))));
+      self.close();
+    }, false);
 
-		hooks: {
-			all: {},
+    return self.Prism;
+  }
 
-			add: function (name, callback) {
-				var hooks = Prism.hooks.all;
+  // Get current script and highlight
+  var script = document.getElementsByTagName('script');
 
-				hooks[name] = hooks[name] || [];
+  script = script[script.length - 1];
 
-				hooks[name].push(callback);
-			},
+  if (script) {
+    _.filename = script.src;
 
-			run: function (name, env) {
-				var callbacks = Prism.hooks.all[name];
-				if (!callbacks || !callbacks.length) {
-					return;
-				}
-				for (var i=0, callback; callback = callbacks[i++];) {
-					callback(env);
-				}
-			}
-		}
+    if (document.addEventListener && !script.hasAttribute('data-manual')) {
+      document.addEventListener('DOMContentLoaded', _.highlightAll);
+    }
+  }
 
-	};
+  return self.Prism;
 
-	var Token = Prism.Token = function(type, content) {
-		this.type = type;
-		this.content = content;
-	};
+  })();
 
-	Token.stringify = function(o, language, parent) {
-		if (typeof o == 'string') {
-			return o;
-		}
-
-		if (Object.prototype.toString.call(o) == '[object Array]') {
-			return o.map(function(element) {
-				return Token.stringify(element, language, o);
-			}).join('');
-		}
-
-		var env = {
-			type: o.type,
-			content: Token.stringify(o.content, language, parent),
-			tag: 'span',
-			classes: ['token', o.type],
-			attributes: {},
-			language: language,
-			parent: parent
-		};
-
-		if (env.type == 'comment') {
-			env.attributes['spellcheck'] = 'true';
-		}
-
-		Prism.hooks.run('wrap', env);
-
-		var attributes = '';
-
-		for (var name in env.attributes) {
-			attributes += name + '="' + (env.attributes[name] || '') + '"';
-		}
-
-		return '<' + env.tag + ' class="' + env.classes.join(' ') + '" ' + attributes + '>' + env.content + '</' + env.tag + '>';
-
-	};
-
-	if (!self.document) {
-		// In worker
-		self.addEventListener('message', function(evt) {
-			var message = JSON.parse(evt.data),
-			    lang = message.language,
-			    code = message.code;
-
-			self.postMessage(JSON.stringify(Prism.tokenize(code, Prism.languages[lang])));
-			self.close();
-		}, false);
-
-		return;
-	}
-
-	// Export
-	return Prism;
-
+  // Export Prism.
+  return Prism
 });
