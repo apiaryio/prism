@@ -55,7 +55,35 @@ describe('Prism', function(){
 
     });
 
-  });
+    describe('‘escaping’ is turned off', function() {
+      describe('JavaScript Syntax Highlighting', function() {
+        describe('When I highlight ‘alert(\'<span>Hello!</span>\');’', function() {
+          var actualOutput;
 
+          var expectedOutput = '<span class="token function" >alert';
+          expectedOutput += '<span class="token punctuation" >(</span>';
+          expectedOutput += '</span>';
+          expectedOutput += '<span class="token string oneLine" >\'<span>Hello!</span>\'</span>';
+          expectedOutput += '<span class="token punctuation" >)</span>';
+
+          before(function() {
+            options = {
+              encoding: {
+                skipTokens: ['\'<span>Hello!</span>\'']
+              }
+            };
+
+            actualOutput = prism.highlight('alert(\'<span>Hello!</span>\')', prism.languages.javascript, options);
+          });
+
+          it('It should be properly highlighted', function() {
+            assert.strictEqual(actualOutput, expectedOutput);
+          });
+
+        });
+      });
+    });
+
+  });
 });
 

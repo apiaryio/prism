@@ -19,12 +19,20 @@ define(function() {
 
   var _ = self.Prism = {
     util: {
-      encode: function (tokens) {
+      encode: function (tokens, options) {
         if (tokens instanceof Token) {
-          return new Token(tokens.type, _.util.encode(tokens.content), tokens.alias);
+          return new Token(tokens.type, _.util.encode(tokens.content, options), tokens.alias);
         } else if (_.util.type(tokens) === 'Array') {
-          return tokens.map(_.util.encode);
+          return tokens.map(function(token) {
+            return _.util.encode(token, options);
+          });
         } else {
+          if (options && options.encoding && options.encoding.skipTokens) {
+            if (options.encoding.skipTokens.indexOf(tokens) > -1) {
+              return tokens
+            }
+          }
+
           return tokens.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/\u00a0/g, ' ');
         }
       },
@@ -111,9 +119,9 @@ define(function() {
       }
     },
 
-    highlight: function (text, grammar, language) {
+    highlight: function (text, grammar, options) {
       var tokens = _.tokenize(text, grammar);
-      return Token.stringify(_.util.encode(tokens), language);
+      return Token.stringify(_.util.encode(tokens, options), undefined);
     },
 
     tokenize: function(text, grammar, language) {
