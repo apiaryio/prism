@@ -111,88 +111,6 @@ define(function() {
       }
     },
 
-    highlightAll: function(async, callback) {
-      var elements = document.querySelectorAll('code[class*="language-"], [class*="language-"] code, code[class*="lang-"], [class*="lang-"] code');
-
-      for (var i=0, element; element = elements[i++];) {
-        _.highlightElement(element, async === true, callback);
-      }
-    },
-
-    highlightElement: function(element, async, callback) {
-      // Find language
-      var language, grammar, parent = element;
-
-      while (parent && !lang.test(parent.className)) {
-        parent = parent.parentNode;
-      }
-
-      if (parent) {
-        language = (parent.className.match(lang) || [,''])[1];
-        grammar = _.languages[language];
-      }
-
-      if (!grammar) {
-        return;
-      }
-
-      // Set language on the element, if not present
-      element.className = element.className.replace(lang, '').replace(/\s+/g, ' ') + ' language-' + language;
-
-      // Set language on the parent, for styling
-      parent = element.parentNode;
-
-      if (/pre/i.test(parent.nodeName)) {
-        parent.className = parent.className.replace(lang, '').replace(/\s+/g, ' ') + ' language-' + language;
-      }
-
-      var code = element.textContent;
-
-      if(!code) {
-        return;
-      }
-
-      var env = {
-        element: element,
-        language: language,
-        grammar: grammar,
-        code: code
-      };
-
-      _.hooks.run('before-highlight', env);
-
-      if (async && self.Worker) {
-        var worker = new Worker(_.filename);
-
-        worker.onmessage = function(evt) {
-          env.highlightedCode = Token.stringify(JSON.parse(evt.data), language);
-
-          _.hooks.run('before-insert', env);
-
-          env.element.innerHTML = env.highlightedCode;
-
-          callback && callback.call(env.element);
-          _.hooks.run('after-highlight', env);
-        };
-
-        worker.postMessage(JSON.stringify({
-          language: env.language,
-          code: env.code
-        }));
-      }
-      else {
-        env.highlightedCode = _.highlight(env.code, env.grammar, env.language)
-
-        _.hooks.run('before-insert', env);
-
-        env.element.innerHTML = env.highlightedCode;
-
-        callback && callback.call(element);
-
-        _.hooks.run('after-highlight', env);
-      }
-    },
-
     highlight: function (text, grammar, language) {
       var tokens = _.tokenize(text, grammar);
       return Token.stringify(_.util.encode(tokens), language);
@@ -354,37 +272,6 @@ define(function() {
     return '<' + env.tag + ' class="' + env.classes.join(' ') + '" ' + attributes + '>' + env.content + '</' + env.tag + '>';
 
   };
-
-  if (!self.document) {
-    if (!self.addEventListener) {
-      // in Node.js
-      return self.Prism;
-    }
-    // In worker
-    self.addEventListener('message', function(evt) {
-      var message = JSON.parse(evt.data),
-          lang = message.language,
-          code = message.code;
-
-      self.postMessage(JSON.stringify(_.util.encode(_.tokenize(code, _.languages[lang]))));
-      self.close();
-    }, false);
-
-    return self.Prism;
-  }
-
-  // Get current script and highlight
-  var script = document.getElementsByTagName('script');
-
-  script = script[script.length - 1];
-
-  if (script) {
-    _.filename = script.src;
-
-    if (document.addEventListener && !script.hasAttribute('data-manual')) {
-      document.addEventListener('DOMContentLoaded', _.highlightAll);
-    }
-  }
 
   return self.Prism;
 
