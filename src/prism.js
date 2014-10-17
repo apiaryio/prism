@@ -28,8 +28,12 @@ define(function() {
           });
         } else {
           if (options && options.encoding && options.encoding.skipTokens) {
-            if (options.encoding.skipTokens.indexOf(tokens) > -1) {
-              return tokens
+            match = (options.encoding.skipTokens).some(function(token) {
+              return new RegExp(token, 'gi').test(tokens);
+            });
+
+            if (match) {
+              return tokens;
             }
           }
 
